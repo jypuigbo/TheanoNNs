@@ -31,6 +31,9 @@ theano.config.profile = False
 theano.config.floatX='float32'
 #theano.config.device = 'gpu'
 
+global A1Tau
+A1Tau = 0.01 # Between [ 0.01 , 0.02 ], from Shamma/Yang
+
 
 def generateRandomSignalBut(epoch,center_F,size=512,f=(0,12),but=0,noi=0.333, n_harmonics=0):
     #f=(110,220,330,440,660,880)
@@ -664,25 +667,25 @@ def something(x,logs):
 	#print logs
 	#print aux
 	return aux
-def finiteIsMean(x,mu):
+def infiniteIsMean(x,mu):
 	x[np.isfinite(x) == False] = mu[np.isfinite(x) == False]
 	return x
 def average_input(new_input):
-	global input_means, input_std, input_alpha, input_out
+	global input_means, input_std, input_alpha, input_out, A1Tau
 	# new_input[np.isfinite(new_input) == False] = input_means[np.isfinite(new_input) == False]
 	#print np.isfinite(new_input)
-	new_input = np.apply_along_axis(finiteIsMean,0,new_input, input_means)
+	new_input = np.apply_along_axis(infiniteIsMean,0,new_input, input_means)
 	#print np.isfinite(new_input)
 	means = input_means*(1-input_alpha)+input_alpha*new_input
 	std = np.sqrt(np.power(input_std,2)*(1-input_alpha)+np.power(new_input-input_means,2)*input_alpha)
-
-	out = (new_input-input_means)/input_std # 0.5 + 0.5*np.tanh((new_input-means)/std) #np.sqrt(2))
-	out = input_means
 	input_means = means
 	input_std = std
+	out = (new_input-input_means)/input_std # 0.5 + 0.5*np.tanh((new_input-means)/std) #np.sqrt(2))
+	out = input_means
+	
 	#out[np.isfinite(out) == False] = input_out[np.isfinite(out) == False]
-	out = np.apply_along_axis(finiteIsMean,0,out, input_out)
-	input_out = out
+	out = np.apply_along_axis(infiniteIsMean,0,out, input_out)
+	input_out = input_out + (1/A1Tau) * np.maximum(out,0)
 	#print 'max: ' + str(np.max(out))
 	#print 'min: ' + str(np.min(out))
 	return out
