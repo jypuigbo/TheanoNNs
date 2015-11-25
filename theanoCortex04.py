@@ -74,7 +74,7 @@ def generateRandomSignalBut(epoch,center_F,size=512,f=(0,12),but=0,noi=0.33, n_h
 
 
 
-def non_square_diagonal(s1,s2,sg=0.01, show_image=True):
+def non_square_diagonal(s1,s2,sg=0.01, show_image=False):
 	if s1 == s2:
 		res = np.identity(s1)
 	else: 
@@ -118,7 +118,7 @@ def flattenKernel(k,n):
 	#new_kernel = k.flatten(0)
 	#plt.imshow(k,aspect='auto')
 	#plt.show()
-	if True:
+	if False:
 		plt.imshow(new_kernel.reshape(new_kernel.size,1),aspect='auto')
 		plt.show()
 	'''plt.imshow(k)
@@ -141,10 +141,10 @@ def fitMatrixSize(mat,shape1, shape2):
 		center = int(mat.shape[1]/2)
 		if m < size/2.:
 			print "UP!!!!!!!!!!!!!!!!!!!!"
-			n_mat = mat[:,(center-int(m)-1):(center+int(m))]
+			n_mat = mat[:,(center-int(m)):(center+int(m)+1)]
 		else:
 			print "Down!!!!!!!!!!!!!!!!!!1"
-			n_mat = mat[:,(center-int(m)-1):(center+int(m)-1)]
+			n_mat = mat[:,(center-int(m)):(center+int(m))]
 		print "[info] Shape was fit from " + str(mat.shape) + " to " + str(n_mat.shape)
 	else:
 		n_mat=mat
@@ -155,10 +155,10 @@ def fitMatrixSize(mat,shape1, shape2):
 		center = int(mat.shape[0]/2)
 		if m < size/2.:
 			print "updown!!"
-			n_mat = n_mat[(center-int(m)-1):(center+int(m)),:]
+			n_mat = n_mat[(center-int(m)):(center+int(m)+1),:]
 		else:
 			
-			n_mat = n_mat[(center-int(m)-1):(center+int(m)-1),:]
+			n_mat = n_mat[(center-int(m)):(center+int(m)),:]
 		print "[info] Shape was fit from " + str(mat.shape) + " to " + str(n_mat.shape)
 	if (mat.shape[0] == shape1[0]*shape1[1]) and (mat.shape[1] == shape2[0]*shape2[1]):
 		n_mat=mat
@@ -172,8 +172,8 @@ def kernel2connection(k,inp, out,show_image=True):
 	print "[info] Connection Matrix shape: " + str(connections.shape)
 	#print flattenKernel(k,n_col).shape
 	aux = flattenKernel(k,out[1])
-	plt.imshow(aux, aspect='auto')
-	plt.show()
+	#plt.imshow(aux, aspect='auto')
+	#plt.show()
 	connections = sg.convolve(connections,aux)
 	if show_image:
 		#print connections[25,:].shape
@@ -253,6 +253,10 @@ class connection():
 		self.file = weights_file
 		self.c_name = c_name
 		self.R = recursive
+		if k<0:
+			self.inhibition=-1
+		else:
+			self.inhibition=1
 		
 		
 		self.i_shape = i_shape
@@ -270,10 +274,10 @@ class connection():
 			raise
 		
 		self.file = weights_file
-		self.k = k
+		self.k = abs(k)
 
 	def setFName(self, o_shape):
-		self.file = self.c_name + str(self.i_shape) + 'x' + str(o_shape) + '_f_' + str(self.shape[0]) + 's' + str(self.sigma) + '.npy'
+		self.file = self.c_name + str(self.i_shape) + 'x' + str(o_shape) + '_f_' + str(self.shape[0]) + 's' + str(self.sigma) + 'k' + str(self.k*self.inhibition)+'.npy'
 
 
 	def generateConnectionMatrix(self, o_shape, generate):
@@ -297,8 +301,8 @@ class connection():
 			if np.sum(Wi,1)[0] != 1:
 				Wi /= np.sum(Wi,1).reshape((Wi.shape[0],1))*self.k
 			np.save(self.file,Wi)
-		if not self.R:
-			Wi *= -(np.identity(Wi.shape[0])-1)
+		#if not self.R:
+		#	Wi *= -(np.identity(Wi.shape[0])-1)
 
 		return Wi
 
@@ -444,7 +448,7 @@ class HebbianAdaptiveLayer(object):
 		for i, c in enumerate(self.connections):
 			aux.append(sparse.structured_dot(
 						sparse.transpose(c.input), 
-						self.params[2][i]
+						self.params[2][i] * c.inhibition
 						))
 		aux2 = aux.pop()
 		for a in range(len(aux)):
@@ -453,13 +457,22 @@ class HebbianAdaptiveLayer(object):
 		from theano import pp
 		print 'out: '
 		print pp(aux2)
+		update.append((self.params[1],sparse.transpose(sparse.structured_sigmoid(aux2))))
 		# Hardcoded!!
-		update.append((self.params[1],
+		'''update.append((self.params[1],
 			sparse.transpose(
 				sparse.structured_sigmoid(sparse.structured_dot(
 						sparse.transpose(self.connections[0].input), 
 						self.params[2][0])))))
-
+		'''
+		'''
+		update.append((self.params[1], 
+		  sparse.transpose(
+			sparse.structured_sigmoid(
+				sparse.structured_dot(
+					sparse.transpose(self.connections[0].input), 	# Input
+					self.params[2][0]))))) 							# Weights
+		'''
 		# Update weights
 		''' #Old ones (OJA)
 		for i, w in enumerate(self.params[2]):
@@ -474,8 +487,7 @@ class HebbianAdaptiveLayer(object):
 				))
 		'''
 		for i, w in enumerate(self.params[2]):
-			update.append( (w, w))
-			''' 
+			update.append( (w, #w))
 				#layer.params[0]))
 					sparse.structured_maximum(
 						sparse.add(
@@ -483,7 +495,7 @@ class HebbianAdaptiveLayer(object):
 							sparse.add(self.xy[i], 
 							self.AWW[i])),
 					0)
-				) )'''
+				) )
 
 		return update
 
@@ -499,7 +511,7 @@ x = T.matrix('x',dtype = 'float32') #T.matrix('x')   # the data is presented as 
 #weights1 = gkern2(filter_shape[2],sigma).reshape(filter_shape)
 
 
-input_shape = (15, 5)
+input_shape = (51, 5)
 inp_filter_shape = (5,5)
 inp_filter_sigma = 7
 L0_shape = (31,1)
@@ -516,10 +528,10 @@ sigma = 1
 #r_file = 'test_Wr.npy'
 LR = np.cast['float32'](0.000001)
 #aux = np.array(0.01,dtype='float32')
-delta = np.cast['float32'](0.01)
+delta = np.cast['float32'](0.000001)
 Wmax =np.cast['float32'](0.9)
 Wmin = np.cast['float32'](0.0)
-awe = np.cast['float32'](-0.5) # LR * int(W(*)e), usually negative
+awe = np.cast['float32'](-0.7) # LR * int(W(*)e), usually negative
 
 global generate
 generate = True
@@ -528,21 +540,22 @@ generate = True
 Cin = []
 #input_layer = HebbianInhibitoryLayer(layer0_input,inp_filter_shape,inp_filter_sigma,input_shape,input_shape, i_file, r_file)
 input_layer = HebbianAdaptiveLayer(layer0_input,Cin,input_shape, input_shape)
-c2in = connection('inh_ex_',layer0_input,  input_shape,(3,3), [1,3], k=1)
-c1in = connection('inh_rec_',input_layer.output, input_shape,(15,15), [7,2], k=-1, recursive = False)
-input_layer.addConnections([c2in])
+c0in = connection('inp_ex_',layer0_input,  input_shape,(5,5), [3,5], k=1)
+c1in = connection('inp_rec_',input_layer.output, input_shape,(15,15), [3,7], k=-0.7, recursive = True)
+c2in = connection('inp_inh_',input_layer.output, input_shape,(15,15), [3,11], k=0.7, recursive = True)
+input_layer.addConnections([c2in,c1in, c0in])
 #i_file = 'Wi_' + str(input_shape) + 'x' + str(L0_shape) + '_' + str(filter_shape[0]) + 's' + str(sigma) + '.npy'
 r_file = 'test_Wr.npy'
 # input, filter_shape, sigmas, weights_file, k=1
-
+'''
 CL0 = []
 layer0 = HebbianAdaptiveLayer(input_layer.output,CL0,input_shape, L0_shape)
 c1L0 = connection('L0_Wi_', input_layer.output,input_shape,filter_shape, [5, 5],k=1)
 layer0.addConnections([c1L0])
 #layer1 = HebbianAdaptiveLayer(layer0.output,filter_shape,sigma,s1,s2,s2,final_shape,Wi=Wi,Wr=Wr)
 
-layers = [layer0]#, layer1]
-out = [layer0.output]#, layer1.output]
+layers = [layer0]#, layer1]'''
+out = [input_layer.output]#, layer1.output]
 
 inp = T.matrix()
 #propagate = theano.function([out],y)
@@ -590,7 +603,7 @@ print old_W
 #wi=hebbianL([layer.params[0]])
 '''
 
-updates = input_layer.getUpdateParams() + layer0.getUpdateParams()
+updates = input_layer.getUpdateParams() #+ layer0.getUpdateParams()
 
 
 propagate = theano.function(
@@ -692,8 +705,8 @@ def dataIsAudio(x,logs,shap):
 	#z = sigmoid(np.maximum(z+2,0))
 	#print z.shape
 	#print np.min(z)
-	z = np.zeros(shap)
-	z[shap[0]/2,shap[1]/2]=1
+	#z = np.zeros(shap)
+	#z[shap[0]/2,shap[1]/2]=1
 	#z[shap[0]/2+1,shap[1]/2]=1
 	z=z.reshape((shap[0]*shap[1],1),order='C')
 	return z
@@ -708,7 +721,7 @@ for n_epoch in range(1000):
 	#fig.canvas.draw()
 	fft_input,CF,SNR=generateRandomSignalBut(n_epoch,CF,size=input_shape[0],f=freqs, but=0,noi=noise)
 	#print input_layer.output.get_value()
-	orig_in.set_data(input_layer.output.get_value().toarray().reshape((15,5),order='C'))
+	orig_in.set_data(input_layer.output.get_value().toarray().reshape((51,5),order='C'))
 	#logs = np.array([ 0.1,  0.2,  0.3,  0.4,  0.6])
 	#audio_input = average_input(fft_input, audio_input, alpha)
 	z=dataIsAudio(fft_input, logs, input_shape)
@@ -720,7 +733,7 @@ for n_epoch in range(1000):
 	#w.set_data( outp.toarray().reshape((s1,s2)) )
 	print input_layer.weights[0].get_value().toarray()
 	w.set_data(input_layer.weights[0].get_value().toarray())
-	out_plot.set_data(outp[0].toarray().reshape(L0_shape))
+	#out_plot.set_data(outp[0].toarray().reshape(L0_shape))
 	#w.set_data(Wi)
 	fig.canvas.draw()
 	
