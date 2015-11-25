@@ -281,10 +281,11 @@ class connection():
 			Wi *= -(np.identity(Wi.shape[0])-1)
 
 		return Wi
-
+def sizeFromShape(shape):
+		return shape[0]*shape[1]
 class HebbianAdaptiveLayer(object):
 	def __init__(self, input, connections, i_shape, o_shape):
-		global generate
+		global generate, delta, Wmax, Wmin
 		# Mean neuron density ~80k/mm^3 in V2 (skoglund 1996)
 		# Synapse length follow a power law ()
 		# Synapse length for feedback interareal ~10-40mm, feedforward same, but less connections
@@ -299,11 +300,15 @@ class HebbianAdaptiveLayer(object):
 			raise
 
 		self.o_shape = o_shape
+		self.i = 0
 		self.weights = []
 		self.params = []
 		self.yw = []
 		self.x_yw = []
+		self.LR=[]
 		self.connections = connections # Should be an empty list
+		self.Wmax=[]
+		self.Wmin=[]
 
 		# Output of the layer is the sigmoid of the convolved network, computed in params
 		self.state = theano.shared( 
@@ -331,8 +336,10 @@ class HebbianAdaptiveLayer(object):
 		# input = external + recursive (from layer)
 		# self.input = T.dot(input, self.Wi) #+ T.sum(T.dot(self.state,self.Wr),1)
 
-		
-		for i, c in enumerate(connections):
+		self.params.append(self.weights)
+		self.addConnections(connections)
+		'''for i, c in enumerate(connections):
+			self.i=i
 			# Weights
 			self.weights.append(
 				theano.shared( 
@@ -340,6 +347,18 @@ class HebbianAdaptiveLayer(object):
 					np.asarray( 
 					c.generateConnectionMatrix(self.o_shape, generate), 
 					dtype=self.input.dtype) ), name ='Wi_' + str(i)))
+			self.Wmax.append(
+				theano.shared(
+					sp.csc_matrix(
+					np.asarray( 
+					np.ones((c.i_shape,self.o_shape))*Wmax, 
+					dtype=self.input.dtype) ), name ='WM_' + str(i)))
+			self.Wmin.append(
+				theano.shared(
+					sp.csc_matrix(
+					np.asarray( 
+					np.ones((c.i_shape,self.o_shape))*Wmin, 
+					dtype=self.input.dtype) ), name ='WM_' + str(i)))
 			# yw
 			# out: nx1
 			# Wi: mxn
@@ -354,18 +373,45 @@ class HebbianAdaptiveLayer(object):
 				sparse.sub(
 					sparse.transpose(c.input),
 					self.yw[i]))
-		self.params.append(self.weights)
+			if self.weights:
+				self.LR.append(delta*(
+					sparse.sub(
+						sparse.structured_pow(
+							sparse.sub(self.Wmax, self.weights[i]),
+							2), 
+						sparse.structured_pow(
+							sparse.sub(self.Wmin, self.weights[i]),
+							2))))
+			else:
+				print "[Warning] Weights is empty. No connections provided?"
+		'''
+
 
 	def addConnections(self, connections):
+		global delta, Wmin, Wmax
 		self.connections = self.connections + connections
+		i=0
 		for i, c in enumerate(connections):
+			j = self.i + i
 			# Weights
 			self.weights.append(
 				theano.shared( 
 					sp.csc_matrix(
 					np.asarray( 
 					c.generateConnectionMatrix(self.o_shape, generate), 
-					dtype=self.input.dtype) ), name ='Wi_' + str(i)))
+					dtype=self.input.dtype) ), name ='Wi_' + str(j)))
+			self.Wmax.append(
+				theano.shared(
+					sp.csc_matrix(
+					np.asarray( 
+					np.ones((sizeFromShape(c.i_shape),sizeFromShape(self.o_shape)))*Wmax, 
+					dtype=self.input.dtype) ), name ='WM_' + str(i)))
+			self.Wmin.append(
+				theano.shared(
+					sp.csc_matrix(
+					np.asarray( 
+					np.ones((sizeFromShape(c.i_shape),sizeFromShape(self.o_shape)))*Wmin, 
+					dtype=self.input.dtype) ), name ='WM_' + str(i)))
 			# yw
 			# out: nx1
 			# Wi: mxn
@@ -373,13 +419,27 @@ class HebbianAdaptiveLayer(object):
 			self.yw.append(
 				sparse.structured_dot(
 					sparse.transpose(self.output),
-					sparse.transpose(self.weights[i])))
+					sparse.transpose(self.weights[j])))
 			# x_yw
 			# in: nx1
 			self.x_yw.append(
 				sparse.sub(
 					sparse.transpose(c.input),
-					self.yw[i]))
+					self.yw[j]))
+			print len(self.weights)
+			print self.weights[i].type
+			print self.weights[i].type.ndim
+			print 
+			if self.weights:
+				self.LR.append(delta*(
+					sparse.sub(
+						sparse.structured_pow(
+							sparse.sub(self.Wmax[j], self.weights[i]),
+							2), 
+						sparse.structured_pow(
+							sparse.sub(self.Wmin[j], self.weights[i]),
+							2))))
+		self.i +=i
 		self.params[2] = self.weights
 
 
@@ -406,12 +466,13 @@ class HebbianAdaptiveLayer(object):
 			sparse.transpose(
 				sparse.structured_sigmoid(aux2))))
 
+		# Update weights
 		for i, w in enumerate(self.params[2]):
 			update.append( (w,  
 				#layer.params[0]))
 				sparse.add( 
 					w, 
-					LR*sparse.transpose(
+					self.LR[i]*sparse.transpose(
 						sparse.structured_dot(self.params[1], self.x_yw[i])
 						)
 					)
@@ -446,21 +507,22 @@ sigma = 1
 
 #i_file = 'Wi_' + str(input_shape) + 'x' + str(L0_shape) + '_' + str(filter_shape[0]) + 's' + str(sigma) + '.npy'
 #r_file = 'test_Wr.npy'
-LR = np.cast['float32'](0.000001)
+LR = np.cast['float32'](0.00001)
+aux = np.array(0.01,dtype='float32')
+delta = np.cast['float32'](0.01)
+Wmax =np.cast['float32'](0.9)
+Wmin = np.cast['float32'](0.0)
 
 global generate
 generate = True
 
-
-i_file = 'inh_i_' + str(input_shape) + 'x' + str(input_shape) + '_' + str(inp_filter_shape[0]) + 's' + str(inp_filter_sigma) + '.npy'
-r_file = 'inh_r_' + str(input_shape) + 'x' + str(input_shape) + '_' + str(3) + 's' + str(1) + '.npy'
 
 Cin = []
 #input_layer = HebbianInhibitoryLayer(layer0_input,inp_filter_shape,inp_filter_sigma,input_shape,input_shape, i_file, r_file)
 input_layer = HebbianAdaptiveLayer(layer0_input,Cin,input_shape, input_shape)
 c2in = connection('inh_ex_',layer0_input,  input_shape,(7,7), [1, 1], k=10)
 c1in = connection('inh_rec_',input_layer.output, input_shape,(15,15), [7,7], k=-10000, recursive = False)
-input_layer.addConnections([c2in, c1in])
+input_layer.addConnections([c2in])
 i_file = 'Wi_' + str(input_shape) + 'x' + str(L0_shape) + '_' + str(filter_shape[0]) + 's' + str(sigma) + '.npy'
 r_file = 'test_Wr.npy'
 # input, filter_shape, sigmas, weights_file, k=1
