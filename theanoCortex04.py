@@ -22,6 +22,19 @@ import scipy.ndimage.filters as fi
 from theano import sparse
 import scipy.sparse as sp
 
+from mpl_toolkits.axes_grid1 import make_axes_locatable
+
+
+def detect_nan(i, node, fn):
+    for output in fn.outputs:
+        if (not isinstance(output[0], np.random.RandomState) and
+            np.isnan(output[0]).any()):
+            print '*** NaN detected ***'
+            theano.printing.debugprint(node)
+            print 'Inputs : %s' % [input[0] for input in fn.inputs]
+            print 'Outputs: %s' % [output[0] for output in fn.outputs]
+            break
+
 # Params
 
 #theano.config.compute_test_value = 'warn'
@@ -29,6 +42,7 @@ theano.config.on_unused_input = 'warn'
 theano.config.exception_verbosity='high'
 theano.config.profile = False
 theano.config.floatX='float32'
+
 #theano.config.device = 'gpu'
 
 global A1Tau
@@ -434,22 +448,24 @@ class HebbianAdaptiveLayer(object):
 			print self.weights[i].type.ndim
 			print 
 			if self.weights:
+				auxX=sparse.sub(self.Wmax[j], self.weights[i])
+				auxY=sparse.sub(self.weights[i], self.Wmin[j])
 				self.LR.append(delta*(
 					sparse.sub(
 						sparse.structured_pow(
 							sparse.sub(self.Wmax[j], self.weights[i]),
-							2), 
+							1), 
 						sparse.structured_pow(
 							sparse.sub(self.Wmin[j], self.weights[i]),
-							2))))
+							1))))
 				self.xy.append(
 					self.LR[i]*sparse.structured_dot(
 						c.input,
 						sparse.transpose(self.output)))
 				self.AWW.append(
-					awe*sparse.structured_pow(
+					awe*delta*sparse.structured_pow(
 								sparse.sub(self.Wmax[j], self.weights[i]),
-								2)*self.weights[i])
+								1)*self.weights[i])
 		self.i +=i
 		self.params[2] = self.weights
 
@@ -463,7 +479,7 @@ class HebbianAdaptiveLayer(object):
 		update.append( (self.params[0], input_layer.output) )
 
 		# Update output
-		print len(self.connections)
+		print 'Length: ' + str(len(self.connections))
 		for i, c in enumerate(self.connections):
 			aux.append(sparse.structured_dot(
 						sparse.transpose(c.input), 
@@ -473,9 +489,15 @@ class HebbianAdaptiveLayer(object):
 		for a in range(len(aux)):
 			aux2 = sparse.add(aux2,aux.pop())
 			print aux2
+		from theano import pp
+		print 'out: '
+		print pp(aux2)
+		# Hardcoded!!
 		update.append((self.params[1],
 			sparse.transpose(
-				sparse.structured_sigmoid(aux2))))
+				sparse.structured_sigmoid(sparse.structured_dot(
+						sparse.transpose(self.connections[0].input), 
+						self.params[2][0])))))
 
 		# Update weights
 		''' #Old ones (OJA)
@@ -493,10 +515,13 @@ class HebbianAdaptiveLayer(object):
 		for i, w in enumerate(self.params[2]):
 			update.append( (w,  
 				#layer.params[0]))
-				sparse.add(
-				w,
-				sparse.add(self.xy[i], 
-				self.AWW[i])))) 
+					sparse.structured_maximum(
+						sparse.add(
+							w,
+							sparse.add(self.xy[i], 
+							self.AWW[i])),
+					0)
+				) )
 
 		return update
 
@@ -529,10 +554,10 @@ sigma = 1
 #r_file = 'test_Wr.npy'
 LR = np.cast['float32'](0.000001)
 #aux = np.array(0.01,dtype='float32')
-delta = np.cast['float32'](0.0001)
+delta = np.cast['float32'](0.01)
 Wmax =np.cast['float32'](0.9)
 Wmin = np.cast['float32'](0.0)
-awe = np.cast['float32'](-1) # LR * int(W(*)e), usually negative
+awe = np.cast['float32'](-0.5) # LR * int(W(*)e), usually negative
 
 global generate
 generate = True
@@ -547,10 +572,11 @@ input_layer.addConnections([c2in])
 #i_file = 'Wi_' + str(input_shape) + 'x' + str(L0_shape) + '_' + str(filter_shape[0]) + 's' + str(sigma) + '.npy'
 r_file = 'test_Wr.npy'
 # input, filter_shape, sigmas, weights_file, k=1
-c1L0 = connection('L0_Wi_', input_layer.output,input_shape,filter_shape, [3, 3],k=1)
-CL0 = [c1L0]
-layer0 = HebbianAdaptiveLayer(input_layer.output,CL0,input_shape, L0_shape)
 
+CL0 = []
+layer0 = HebbianAdaptiveLayer(input_layer.output,CL0,input_shape, L0_shape)
+c1L0 = connection('L0_Wi_', input_layer.output,input_shape,filter_shape, [5, 5],k=1)
+layer0.addConnections([c1L0])
 #layer1 = HebbianAdaptiveLayer(layer0.output,filter_shape,sigma,s1,s2,s2,final_shape,Wi=Wi,Wr=Wr)
 
 layers = [layer0]#, layer1]
@@ -602,15 +628,14 @@ print old_W
 #wi=hebbianL([layer.params[0]])
 '''
 
-updates = input_layer.getUpdateParams()
+updates = input_layer.getUpdateParams() + layer0.getUpdateParams()
 
 
 propagate = theano.function(
     [x],
     out,
     updates=updates,
-    allow_input_downcast=True,
-    mode='ProfileMode'
+    allow_input_downcast=True
 )
 
 # http://www.deeplearning.net/tutorial/lenet.html#lenet
@@ -717,6 +742,7 @@ for n_epoch in range(1000):
 	#p.set_data(z)
 	#fig.canvas.draw()
 	fft_input,CF,SNR=generateRandomSignalBut(n_epoch,CF,size=input_shape[0],f=freqs, but=0,noi=noise)
+	#print input_layer.output.get_value()
 	orig_in.set_data(input_layer.output.get_value().toarray().reshape(input_shape,order='C'))
 	#logs = np.array([ 0.1,  0.2,  0.3,  0.4,  0.6])
 	#audio_input = average_input(fft_input, audio_input, alpha)
@@ -727,7 +753,8 @@ for n_epoch in range(1000):
 	p.set_data( z.reshape(input_shape,order='C') )
 	#print z.shape
 	#w.set_data( outp.toarray().reshape((s1,s2)) )
-	w.set_data(layer0.weights[0].get_value().toarray())
+	print input_layer.weights[0].get_value().toarray()
+	w.set_data(input_layer.weights[0].get_value().toarray())
 	out_plot.set_data(outp[0].toarray().reshape(L0_shape))
 	#w.set_data(Wi)
 	fig.canvas.draw()
