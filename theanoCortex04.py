@@ -35,7 +35,7 @@ global A1Tau
 A1Tau = 0.01 # Between [ 0.01 , 0.02 ], from Shamma/Yang
 
 
-def generateRandomSignalBut(epoch,center_F,size=512,f=(0,12),but=0,noi=0.333, n_harmonics=0):
+def generateRandomSignalBut(epoch,center_F,size=512,f=(0,12),but=0,noi=0.33, n_harmonics=0):
     #f=(110,220,330,440,660,880)
     x= np.random.rand(size)*noi
     Nx=0
@@ -276,7 +276,7 @@ class connection():
 			print 'Shape = ' + str(Wi.shape)
 			if np.sum(Wi,1)[0] != 1:
 				Wi /= np.sum(Wi,1).reshape((Wi.shape[0],1))*self.k
-			np.save(i_file,Wi)
+			np.save(self.file,Wi)
 		if not self.R:
 			Wi *= -(np.identity(Wi.shape[0])-1)
 
@@ -309,6 +309,8 @@ class HebbianAdaptiveLayer(object):
 		self.connections = connections # Should be an empty list
 		self.Wmax=[]
 		self.Wmin=[]
+		self.xy=[]
+		self.AWW=[]
 
 		# Output of the layer is the sigmoid of the convolved network, computed in params
 		self.state = theano.shared( 
@@ -388,7 +390,7 @@ class HebbianAdaptiveLayer(object):
 
 
 	def addConnections(self, connections):
-		global delta, Wmin, Wmax
+		global delta, Wmin, Wmax, awe
 		self.connections = self.connections + connections
 		i=0
 		for i, c in enumerate(connections):
@@ -426,6 +428,7 @@ class HebbianAdaptiveLayer(object):
 				sparse.sub(
 					sparse.transpose(c.input),
 					self.yw[j]))
+			
 			print len(self.weights)
 			print self.weights[i].type
 			print self.weights[i].type.ndim
@@ -439,6 +442,14 @@ class HebbianAdaptiveLayer(object):
 						sparse.structured_pow(
 							sparse.sub(self.Wmin[j], self.weights[i]),
 							2))))
+				self.xy.append(
+					self.LR[i]*sparse.structured_dot(
+						c.input,
+						sparse.transpose(self.output)))
+				self.AWW.append(
+					awe*sparse.structured_pow(
+								sparse.sub(self.Wmax[j], self.weights[i]),
+								2)*self.weights[i])
 		self.i +=i
 		self.params[2] = self.weights
 
@@ -467,6 +478,7 @@ class HebbianAdaptiveLayer(object):
 				sparse.structured_sigmoid(aux2))))
 
 		# Update weights
+		''' #Old ones (OJA)
 		for i, w in enumerate(self.params[2]):
 			update.append( (w,  
 				#layer.params[0]))
@@ -477,6 +489,14 @@ class HebbianAdaptiveLayer(object):
 						)
 					)
 				))
+		'''
+		for i, w in enumerate(self.params[2]):
+			update.append( (w,  
+				#layer.params[0]))
+				sparse.add(
+				w,
+				sparse.add(self.xy[i], 
+				self.AWW[i])))) 
 
 		return update
 
@@ -507,11 +527,12 @@ sigma = 1
 
 #i_file = 'Wi_' + str(input_shape) + 'x' + str(L0_shape) + '_' + str(filter_shape[0]) + 's' + str(sigma) + '.npy'
 #r_file = 'test_Wr.npy'
-LR = np.cast['float32'](0.00001)
-aux = np.array(0.01,dtype='float32')
-delta = np.cast['float32'](0.01)
+LR = np.cast['float32'](0.000001)
+#aux = np.array(0.01,dtype='float32')
+delta = np.cast['float32'](0.0001)
 Wmax =np.cast['float32'](0.9)
 Wmin = np.cast['float32'](0.0)
+awe = np.cast['float32'](-1) # LR * int(W(*)e), usually negative
 
 global generate
 generate = True
@@ -521,9 +542,9 @@ Cin = []
 #input_layer = HebbianInhibitoryLayer(layer0_input,inp_filter_shape,inp_filter_sigma,input_shape,input_shape, i_file, r_file)
 input_layer = HebbianAdaptiveLayer(layer0_input,Cin,input_shape, input_shape)
 c2in = connection('inh_ex_',layer0_input,  input_shape,(7,7), [1, 1], k=10)
-c1in = connection('inh_rec_',input_layer.output, input_shape,(15,15), [7,7], k=-10000, recursive = False)
+c1in = connection('inh_rec_',input_layer.output, input_shape,(15,15), [7,7], k=-1, recursive = False)
 input_layer.addConnections([c2in])
-i_file = 'Wi_' + str(input_shape) + 'x' + str(L0_shape) + '_' + str(filter_shape[0]) + 's' + str(sigma) + '.npy'
+#i_file = 'Wi_' + str(input_shape) + 'x' + str(L0_shape) + '_' + str(filter_shape[0]) + 's' + str(sigma) + '.npy'
 r_file = 'test_Wr.npy'
 # input, filter_shape, sigmas, weights_file, k=1
 c1L0 = connection('L0_Wi_', input_layer.output,input_shape,filter_shape, [3, 3],k=1)
@@ -624,7 +645,7 @@ logs /= np.max(np.log(input_shape[1]+1))
 Maux /= np.max(np.log(input_shape[1]+1))
 Maux = 1-logs
 print logs
-noise = 0.2
+noise = 0.4
 n=1
 global audio_input, input_means, input_std, input_alpha, input_out
 audio_input = 0
