@@ -72,11 +72,11 @@ def generateRandomSignalBut(epoch,center_F,size=512,f=(0,12),but=0,noi=0.33, n_h
     return x,center_F,SNR
 
 
-def non_square_diagonal(s1,s2,sg=0.01, show_image=False):
-	#s1 = s1[0]*s1[1]
-	#s2 = s2[0]*s2[1]
+
+
+def non_square_diagonal(s1,s2,sg=0.01, show_image=True):
 	if s1 == s2:
-		return np.identity(s1)
+		res = np.identity(s1)
 	else: 
 	    sigma=sg
 	    mu = (np.arange(s1)+0.5)/s1
@@ -90,13 +90,16 @@ def non_square_diagonal(s1,s2,sg=0.01, show_image=False):
 	    
 	    res -=np.min(res,1).reshape(res.shape[0],1)
 	    res /= np.max(res,1).reshape(res.shape[0],1)
-	    res *= res
-	    res = res/np.sum(res,1).reshape(s1,1)
-	    if show_image:
+	    res *= res*res*res
+	    #res[res<0.6]=0
+	    res -=np.min(res,1).reshape(res.shape[0],1)
+	    res /= np.max(res,1).reshape(res.shape[0],1)
+	    #res = res/np.sum(res,1).reshape(s1,1)
+
+	if show_image:
 	        plt.imshow(res)
 	        plt.show()
-	    plt.imshow(res)
-	    return res
+	return res
 
 def flattenKernel(k,n):
 	'''Flattens a kernel into a line of a specific size
@@ -106,14 +109,16 @@ def flattenKernel(k,n):
 	'''
 	s = k.shape[0]
 	new_kernel = np.zeros((s,n))
-	print n
+	print s/2.
+	print n/2.
+	print 'here!!!!!'
 	new_kernel[int(s/2),int(n/2)]=1
-	new_kernel = sg.convolve(new_kernel,k)
+	new_kernel = sg.convolve(new_kernel,k,mode='same')
 	new_kernel = new_kernel.flatten(0)
 	#new_kernel = k.flatten(0)
 	#plt.imshow(k,aspect='auto')
 	#plt.show()
-	if False:
+	if True:
 		plt.imshow(new_kernel.reshape(new_kernel.size,1),aspect='auto')
 		plt.show()
 	'''plt.imshow(k)
@@ -134,26 +139,26 @@ def fitMatrixSize(mat,shape1, shape2):
 		m = size/2
 		print m
 		center = int(mat.shape[1]/2)
-		print center
-		print center-int(m)
-		print center+int(m)
 		if m < size/2.:
-			n_mat = mat[:,center-int(m):center+int(m)+1]
+			print "UP!!!!!!!!!!!!!!!!!!!!"
+			n_mat = mat[:,(center-int(m)-1):(center+int(m))]
 		else:
-			n_mat = mat[:,center-int(m):center+int(m)]
+			print "Down!!!!!!!!!!!!!!!!!!1"
+			n_mat = mat[:,(center-int(m)-1):(center+int(m)-1)]
 		print "[info] Shape was fit from " + str(mat.shape) + " to " + str(n_mat.shape)
+	else:
+		n_mat=mat
 	
 	size = shape1[0]*shape1[1]
 	if mat.shape[0] != size:
-		#print "I'm in"
 		m = size/2
-		#print m
 		center = int(mat.shape[0]/2)
-		#print center
 		if m < size/2.:
-			n_mat = mat[center-int(m):center+int(m)+1,:]
+			print "updown!!"
+			n_mat = n_mat[(center-int(m)-1):(center+int(m)),:]
 		else:
-			n_mat = mat[center-int(m):center+int(m),:]
+			
+			n_mat = n_mat[(center-int(m)-1):(center+int(m)-1),:]
 		print "[info] Shape was fit from " + str(mat.shape) + " to " + str(n_mat.shape)
 	if (mat.shape[0] == shape1[0]*shape1[1]) and (mat.shape[1] == shape2[0]*shape2[1]):
 		n_mat=mat
@@ -162,18 +167,22 @@ def fitMatrixSize(mat,shape1, shape2):
 
 def kernel2connection(k,inp, out,show_image=True):
 	'''Converts a kernel based system into a connectivity matrix'''
-	connections = non_square_diagonal(inp[0]*inp[1],out[0]*out[1], sg=0.2) # np.identity(n_row[0]*n_col[1])
+	connections = non_square_diagonal(inp[0]*inp[1],out[0]*out[1], sg=0.1) # np.identity(n_row[0]*n_col[1])
 	print "[info] Kernel shape: " + str(k.shape)
 	print "[info] Connection Matrix shape: " + str(connections.shape)
 	#print flattenKernel(k,n_col).shape
-	
-	connections = sg.convolve(connections,flattenKernel(k,out[1]))
+	aux = flattenKernel(k,out[1])
+	plt.imshow(aux, aspect='auto')
+	plt.show()
+	connections = sg.convolve(connections,aux)
 	if show_image:
-		plt.imshow(connections)
+		#print connections[25,:].shape
+		#plt.imshow(connections[25,:].reshape((51,5), order='C'),aspect='auto')
 		plt.show()
 	connections = fitMatrixSize(connections,inp,out)
 	if show_image:
-		plt.imshow(connections)
+		#print connections[25,:].shape
+		#plt.imshow(connections[25,:].reshape((51,1)),aspect='auto')
 		plt.show()
 	
 	return connections.astype('float32')
@@ -194,7 +203,7 @@ def gkern1(kern_shape, nsig=3,show_image=False):
     aux =  fi.gaussian_filter(inp, nsig/2)
     #print np.max(aux)
     aux = aux/np.max(aux)
-    aux[aux<0.0005]=0
+    #aux[aux<0.0000005]=0
     print "Remember to always check how is the kernel!!!"
     if show_image:
         plt.imshow(aux)
@@ -212,6 +221,7 @@ def gkern2(kern_shape, sigma, show_image=False):
     inp[kern_shape[0]//2, kern_shape[1]//2] = 1
     # gaussian-smooth the dirac, resulting in a gaussian filter mask
     aux =  fi.gaussian_filter(inp, sigma[0]/2)
+    aux*=aux
     aux = aux/np.max(aux)
     aux1 = aux[:,kern_shape[0]//2]
     aux =  fi.gaussian_filter(inp, sigma[1]/2)
@@ -219,7 +229,8 @@ def gkern2(kern_shape, sigma, show_image=False):
     aux2 = aux[kern_shape[0]//2,:]
     #print np.max(aux)
     aux = sg.convolve(aux1.reshape(1,kern_shape[0]),aux2.reshape(kern_shape[0],1))
-    aux[aux<0.0005]=0
+    
+    #aux[aux<0.1]=0
     print aux.shape
     print "Remember to always check how is the kernel!!!"
     if show_image:
@@ -262,11 +273,6 @@ class connection():
 		self.k = k
 
 	def setFName(self, o_shape):
-		print type(self.c_name)
-		print type(self.i_shape)
-		print type(o_shape)
-		print type(self.shape[0])
-		print type(self.sigma)
 		self.file = self.c_name + str(self.i_shape) + 'x' + str(o_shape) + '_f_' + str(self.shape[0]) + 's' + str(self.sigma) + '.npy'
 
 
@@ -295,8 +301,10 @@ class connection():
 			Wi *= -(np.identity(Wi.shape[0])-1)
 
 		return Wi
+
 def sizeFromShape(shape):
 		return shape[0]*shape[1]
+
 class HebbianAdaptiveLayer(object):
 	def __init__(self, input, connections, i_shape, o_shape):
 		global generate, delta, Wmax, Wmin
@@ -354,54 +362,7 @@ class HebbianAdaptiveLayer(object):
 
 		self.params.append(self.weights)
 		self.addConnections(connections)
-		'''for i, c in enumerate(connections):
-			self.i=i
-			# Weights
-			self.weights.append(
-				theano.shared( 
-					sp.csc_matrix(
-					np.asarray( 
-					c.generateConnectionMatrix(self.o_shape, generate), 
-					dtype=self.input.dtype) ), name ='Wi_' + str(i)))
-			self.Wmax.append(
-				theano.shared(
-					sp.csc_matrix(
-					np.asarray( 
-					np.ones((c.i_shape,self.o_shape))*Wmax, 
-					dtype=self.input.dtype) ), name ='WM_' + str(i)))
-			self.Wmin.append(
-				theano.shared(
-					sp.csc_matrix(
-					np.asarray( 
-					np.ones((c.i_shape,self.o_shape))*Wmin, 
-					dtype=self.input.dtype) ), name ='WM_' + str(i)))
-			# yw
-			# out: nx1
-			# Wi: mxn
-			# outT x WiT : 1xm
-			self.yw.append(
-				sparse.structured_dot(
-					sparse.transpose(self.output),
-					sparse.transpose(self.weights[i])))
-			# x_yw
-			# in: nx1
-			self.x_yw.append(
-				sparse.sub(
-					sparse.transpose(c.input),
-					self.yw[i]))
-			if self.weights:
-				self.LR.append(delta*(
-					sparse.sub(
-						sparse.structured_pow(
-							sparse.sub(self.Wmax, self.weights[i]),
-							2), 
-						sparse.structured_pow(
-							sparse.sub(self.Wmin, self.weights[i]),
-							2))))
-			else:
-				print "[Warning] Weights is empty. No connections provided?"
-		'''
-
+		
 
 	def addConnections(self, connections):
 		global delta, Wmin, Wmax, awe
@@ -513,7 +474,8 @@ class HebbianAdaptiveLayer(object):
 				))
 		'''
 		for i, w in enumerate(self.params[2]):
-			update.append( (w,  
+			update.append( (w, w))
+			''' 
 				#layer.params[0]))
 					sparse.structured_maximum(
 						sparse.add(
@@ -521,7 +483,7 @@ class HebbianAdaptiveLayer(object):
 							sparse.add(self.xy[i], 
 							self.AWW[i])),
 					0)
-				) )
+				) )'''
 
 		return update
 
@@ -537,8 +499,8 @@ x = T.matrix('x',dtype = 'float32') #T.matrix('x')   # the data is presented as 
 #weights1 = gkern2(filter_shape[2],sigma).reshape(filter_shape)
 
 
-input_shape = (51, 5)
-inp_filter_shape = (15,15)
+input_shape = (15, 5)
+inp_filter_shape = (5,5)
 inp_filter_sigma = 7
 L0_shape = (31,1)
 filter_shape = (9,9)
@@ -566,8 +528,8 @@ generate = True
 Cin = []
 #input_layer = HebbianInhibitoryLayer(layer0_input,inp_filter_shape,inp_filter_sigma,input_shape,input_shape, i_file, r_file)
 input_layer = HebbianAdaptiveLayer(layer0_input,Cin,input_shape, input_shape)
-c2in = connection('inh_ex_',layer0_input,  input_shape,(7,7), [1, 1], k=10)
-c1in = connection('inh_rec_',input_layer.output, input_shape,(15,15), [7,7], k=-1, recursive = False)
+c2in = connection('inh_ex_',layer0_input,  input_shape,(3,3), [1,3], k=1)
+c1in = connection('inh_rec_',input_layer.output, input_shape,(15,15), [7,2], k=-1, recursive = False)
 input_layer.addConnections([c2in])
 #i_file = 'Wi_' + str(input_shape) + 'x' + str(L0_shape) + '_' + str(filter_shape[0]) + 's' + str(sigma) + '.npy'
 r_file = 'test_Wr.npy'
@@ -654,7 +616,7 @@ w = ax[2].imshow( np.zeros( (input_shape[0]*input_shape[1], L0_shape[0]*L0_shape
 
 out_plot = ax[3].imshow( np.zeros( (L0_shape[0]*L0_shape[1], L0_shape[0]*L0_shape[1]) ) ,vmin=0, vmax=1, interpolation='none')
 
-orig_in = ax[1].imshow( z.reshape(input_shape) ,vmin = 0, vmax = 1,aspect='auto')
+orig_in = ax[1].imshow( z.reshape(input_shape) ,vmin = 0, vmax = 1,aspect='auto', interpolation='none')
 
 
 #w = ax[1].imshow( z.reshape((s1,s2)) )
@@ -730,6 +692,9 @@ def dataIsAudio(x,logs,shap):
 	#z = sigmoid(np.maximum(z+2,0))
 	#print z.shape
 	#print np.min(z)
+	z = np.zeros(shap)
+	z[shap[0]/2,shap[1]/2]=1
+	#z[shap[0]/2+1,shap[1]/2]=1
 	z=z.reshape((shap[0]*shap[1],1),order='C')
 	return z
 print logs
@@ -743,7 +708,7 @@ for n_epoch in range(1000):
 	#fig.canvas.draw()
 	fft_input,CF,SNR=generateRandomSignalBut(n_epoch,CF,size=input_shape[0],f=freqs, but=0,noi=noise)
 	#print input_layer.output.get_value()
-	orig_in.set_data(input_layer.output.get_value().toarray().reshape(input_shape,order='C'))
+	orig_in.set_data(input_layer.output.get_value().toarray().reshape((15,5),order='C'))
 	#logs = np.array([ 0.1,  0.2,  0.3,  0.4,  0.6])
 	#audio_input = average_input(fft_input, audio_input, alpha)
 	z=dataIsAudio(fft_input, logs, input_shape)
@@ -758,8 +723,7 @@ for n_epoch in range(1000):
 	out_plot.set_data(outp[0].toarray().reshape(L0_shape))
 	#w.set_data(Wi)
 	fig.canvas.draw()
-	if n_epoch >1000:
-		asd = input('now')
+	
 
 
 #fig.canvas.mpl_connect('button_press_event', updat)
