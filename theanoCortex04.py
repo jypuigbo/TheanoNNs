@@ -221,9 +221,15 @@ def gkern2(kern_shape, sigma, show_image=False):
 # instantiate 4D tensor for input
 
 #input = T.tensor4(name='input')
-class connection(object):
-	def __init__(self, input, i_shape, filter_shape, sigmas, weights_file, k=1, ):
+class connection():
+	def __init__(self, c_name, input, i_shape, filter_shape, sigmas, weights_file='default', k=1, recursive = True):
+		# Type can be external or internal
 		self.input = input
+		self.file = weights_file
+		self.c_name = c_name
+		self.R = recursive
+		
+		
 		self.i_shape = i_shape
 		print input
 		self.shape = filter_shape
@@ -241,7 +247,19 @@ class connection(object):
 		self.file = weights_file
 		self.k = k
 
+	def setFName(self, o_shape):
+		print type(self.c_name)
+		print type(self.i_shape)
+		print type(o_shape)
+		print type(self.shape[0])
+		print type(self.sigma)
+		self.file = self.c_name + str(self.i_shape) + 'x' + str(o_shape) + '_f_' + str(self.shape[0]) + 's' + str(self.sigma) + '.npy'
+
+
 	def generateConnectionMatrix(self, o_shape, generate):
+		if self.file == 'default':
+			self.setFName(o_shape)
+		
 		try: 
 			if generate:
 				np.load('asd')
@@ -259,6 +277,8 @@ class connection(object):
 			if np.sum(Wi,1)[0] != 1:
 				Wi /= np.sum(Wi,1).reshape((Wi.shape[0],1))*self.k
 			np.save(i_file,Wi)
+		if not self.R:
+			Wi *= -(np.identity(Wi.shape[0])-1)
 
 		return Wi
 
@@ -278,11 +298,12 @@ class HebbianAdaptiveLayer(object):
 			print "[Error] Connections must be a list of connections. "
 			raise
 
+		self.o_shape = o_shape
 		self.weights = []
 		self.params = []
 		self.yw = []
 		self.x_yw = []
-		self.connections = connections
+		self.connections = connections # Should be an empty list
 
 		# Output of the layer is the sigmoid of the convolved network, computed in params
 		self.state = theano.shared( 
@@ -317,8 +338,8 @@ class HebbianAdaptiveLayer(object):
 				theano.shared( 
 					sp.csc_matrix(
 					np.asarray( 
-					c.generateConnectionMatrix(o_shape, generate), 
-					dtype=input.dtype) ), name ='Wi_' + str(i)))
+					c.generateConnectionMatrix(self.o_shape, generate), 
+					dtype=self.input.dtype) ), name ='Wi_' + str(i)))
 			# yw
 			# out: nx1
 			# Wi: mxn
@@ -334,6 +355,34 @@ class HebbianAdaptiveLayer(object):
 					sparse.transpose(c.input),
 					self.yw[i]))
 		self.params.append(self.weights)
+
+	def addConnections(self, connections):
+		self.connections = self.connections + connections
+		for i, c in enumerate(connections):
+			# Weights
+			self.weights.append(
+				theano.shared( 
+					sp.csc_matrix(
+					np.asarray( 
+					c.generateConnectionMatrix(self.o_shape, generate), 
+					dtype=self.input.dtype) ), name ='Wi_' + str(i)))
+			# yw
+			# out: nx1
+			# Wi: mxn
+			# outT x WiT : 1xm
+			self.yw.append(
+				sparse.structured_dot(
+					sparse.transpose(self.output),
+					sparse.transpose(self.weights[i])))
+			# x_yw
+			# in: nx1
+			self.x_yw.append(
+				sparse.sub(
+					sparse.transpose(c.input),
+					self.yw[i]))
+		self.params[2] = self.weights
+
+
 
 	def getUpdateParams(self):
 		update = []
@@ -370,113 +419,6 @@ class HebbianAdaptiveLayer(object):
 
 		return update
 
-# de Prova
-class HebbianInhibitoryLayer(object):
-	def __init__(self, input, filter_shape, sigma,i_shape,o_shape, i_file, r_file, sigma2=None, Wi = False, Wr = False):
-		global generate
-		# Mean neuron density ~80k/mm^3 in V2 (skoglund 1996)
-		# Synapse length follow a power law ()
-		# Synapse length for feedback interareal ~10-40mm, feedforward same, but less connections
-		# Synapse lengths is found by Sholl analysis. 
-		# Ahould compare RF data with Van den Bergh 2010
-		if not sigma2:
-			sigma2=sigma
-
-		# Initialize weights as a shared variable
-		#n_col=input.shape[1]
-		try: 
-			if generate:
-				np.load('asd')
-			else:
-				Wi=np.load(i_file)
-				print '[info] Weights loaded from file!'
-				print 'Shape = ' + str(Wi.shape)
-		except IOError:
-			print "[info] Weights file wasn't found. Generating new connections"
-			kern1 = gkern2(filter_shape,(sigma,sigma2))
-			#kern1 = np.zeros(filter_shape)
-			Wi = kernel2connection(kern1, o_shape, o_shape)
-			Wi = Wi
-			#Wi /= np.sum(Wi,1).reshape((Wi.shape[0],1))*15
-			print 'Shape = ' + str(Wi.shape)
-			np.save(i_file,Wi)
-
-		try: 
-			if generate:
-				np.load('asd')
-			else:
-				Wr=np.load(r_file)
-				print 'Weights loaded from file!'
-		except IOError:
-			print "Weights file wasn't found. Generating new connections"
-			kern2 = gkern2((15,15),(1,5))
-			#kern2 = np.zeros((9,9))
-			#kern2[4,4]=1
-			#plt.imshow(kern2)
-			#plt.show()
-			Wr = kernel2connection(kern2, i_shape,o_shape)
-
-			#Wr /= np.sum(Wi,1)
-			np.save(r_file,Wr)
-		print "Shaaaape!!!!! " + str(Wr.shape)
-		if np.sum(Wi,1)[0] != 1:
-			Wi /= np.sum(Wi,1).reshape((Wi.shape[0],1))*10
-		if np.sum(Wr,1)[0] != 1:
-			Wr /= np.sum(Wr,1).reshape((Wr.shape[0],1))
-		print np.sum(Wi,0)
-		print np.sum(Wi,1)
-		#plt.plot(Wi[1,:])
-		#plt.show()
-
-
-		self.Wi= theano.shared( 
-				sp.csc_matrix(
-				np.asarray( 
-				Wi, 
-				dtype=input.dtype) ), name ='Wi')
-		self.Wr = theano.shared( 
-				sp.csc_matrix(
-				np.asarray( 
-				Wr, 
-				dtype=input.dtype) ), name ='Wr')
-		# Output of the layer is the sigmoid of the convolved network
-		self.state = theano.shared( 
-			sp.csc_matrix(
-			np.asarray( 
-			np.zeros((o_shape[0]*o_shape[1],1)), 
-			dtype=input.dtype) ), name ='St')
-
-		self.input = input
-
-		# I could do the same with biases if needed
-		#print self.input.get_value().shape
-		#print self.Wi.get_value().shape
-		self.output = theano.shared( 
-			sp.csc_matrix(
-			np.asarray( 
-			np.zeros((o_shape[0]*o_shape[1],1)), 
-			dtype=input.dtype) ), name ='Out')
-		#sparse.structured_sigmoid(sparse.structured_dot(self.input, self.Wi))  #T.dot(self.input, self.Wi))
-		# input = external + recursive (from layer)
-		# self.input = T.dot(input, self.Wi) #+ T.sum(T.dot(self.state,self.Wr),1)
-
-		# out: nx1
-		# Wi: mxn
-		# outT x WiT : 1xm
-		self.yw = sparse.structured_dot(
-						sparse.transpose(self.output),
-						sparse.transpose(self.Wi))
-		# in: nx1
-		self.x_yw = sparse.sub(
-						sparse.transpose(self.input),
-						self.yw)
-
-
-		# optional: self.output = T.nnet.sigmoid(conv_out+self.output)
-		self.params = [self.Wi, self.Wr, self.state, self.output]
-		#self.input=input
-
-
 
 
 	# Create the function that solves the previous operations
@@ -493,7 +435,7 @@ input_shape = (51, 5)
 inp_filter_shape = (15,15)
 inp_filter_sigma = 7
 L0_shape = (31,1)
-filter_shape = (9,1)
+filter_shape = (9,9)
 L1_shape = (15,15)
 
 layer0_input = sparse.csc_from_dense(x)
@@ -513,15 +455,17 @@ generate = True
 i_file = 'inh_i_' + str(input_shape) + 'x' + str(input_shape) + '_' + str(inp_filter_shape[0]) + 's' + str(inp_filter_sigma) + '.npy'
 r_file = 'inh_r_' + str(input_shape) + 'x' + str(input_shape) + '_' + str(3) + 's' + str(1) + '.npy'
 
-c1in = connection(layer0_input,input_shape,inp_filter_shape, [inp_filter_sigma, inp_filter_sigma], i_file)
+c1in = connection('inh_ex_',layer0_input, input_shape,(15,15), [7,7], k=-9999999999999999999999999999999, recursive = False)
+
 Cin = [c1in]
 #input_layer = HebbianInhibitoryLayer(layer0_input,inp_filter_shape,inp_filter_sigma,input_shape,input_shape, i_file, r_file)
 input_layer = HebbianAdaptiveLayer(layer0_input,Cin,input_shape, input_shape)
-
+c2in = connection('inh_rec_',input_layer.output, input_shape,(7,7), [1, 1], k=1)
+input_layer.addConnections([c2in])
 i_file = 'Wi_' + str(input_shape) + 'x' + str(L0_shape) + '_' + str(filter_shape[0]) + 's' + str(sigma) + '.npy'
 r_file = 'test_Wr.npy'
 # input, filter_shape, sigmas, weights_file, k=1
-c1L0 = connection(input_layer.output,input_shape,filter_shape, [sigma, sigma], i_file)
+c1L0 = connection('L0_Wi_', input_layer.output,input_shape,filter_shape, [3, 3],k=1)
 CL0 = [c1L0]
 layer0 = HebbianAdaptiveLayer(input_layer.output,CL0,input_shape, L0_shape)
 
@@ -576,7 +520,7 @@ print old_W
 #wi=hebbianL([layer.params[0]])
 '''
 
-updates = layer0.getUpdateParams()
+updates = input_layer.getUpdateParams()
 
 
 propagate = theano.function(
@@ -641,7 +585,7 @@ def something(x,logs):
 	aux/=Maux
 	aux = np.maximum(np.minimum(aux,1),0)
 
-	print aux
+	# print aux
 	#print logs
 	#print aux
 	return aux
