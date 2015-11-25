@@ -455,13 +455,12 @@ generate = True
 i_file = 'inh_i_' + str(input_shape) + 'x' + str(input_shape) + '_' + str(inp_filter_shape[0]) + 's' + str(inp_filter_sigma) + '.npy'
 r_file = 'inh_r_' + str(input_shape) + 'x' + str(input_shape) + '_' + str(3) + 's' + str(1) + '.npy'
 
-c1in = connection('inh_ex_',layer0_input, input_shape,(15,15), [7,7], k=-9999999999999999999999999999999, recursive = False)
-
-Cin = [c1in]
+Cin = []
 #input_layer = HebbianInhibitoryLayer(layer0_input,inp_filter_shape,inp_filter_sigma,input_shape,input_shape, i_file, r_file)
 input_layer = HebbianAdaptiveLayer(layer0_input,Cin,input_shape, input_shape)
-c2in = connection('inh_rec_',input_layer.output, input_shape,(7,7), [1, 1], k=1)
-input_layer.addConnections([c2in])
+c2in = connection('inh_ex_',layer0_input,  input_shape,(7,7), [1, 1], k=10)
+c1in = connection('inh_rec_',input_layer.output, input_shape,(15,15), [7,7], k=-10000, recursive = False)
+input_layer.addConnections([c2in, c1in])
 i_file = 'Wi_' + str(input_shape) + 'x' + str(L0_shape) + '_' + str(filter_shape[0]) + 's' + str(sigma) + '.npy'
 r_file = 'test_Wr.npy'
 # input, filter_shape, sigmas, weights_file, k=1
