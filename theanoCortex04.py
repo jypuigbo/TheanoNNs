@@ -187,23 +187,20 @@ def gkern1(kern_shape, nsig=3,show_image=False):
         plt.show()
     return aux
 
-def gkern2(kern_shape, sig1, sig2=None, show_image=False):
+def gkern2(kern_shape, sigma, show_image=False):
     """Returns a 2D Gaussian kernel array. 
     size is kernlen, gaussian is centered 
     in the middle and std is 'nsig' units"""
-    if not sig2:
-    	print 'Assuming circular kernel'
-    	sig2 = sig1
 
     # create nxn zeros
     inp = np.zeros((kern_shape[0], kern_shape[0]))
     # set element at the middle to one, a dirac delta
     inp[kern_shape[0]//2, kern_shape[1]//2] = 1
     # gaussian-smooth the dirac, resulting in a gaussian filter mask
-    aux =  fi.gaussian_filter(inp, sig1/2)
+    aux =  fi.gaussian_filter(inp, sigma[0]/2)
     aux = aux/np.max(aux)
     aux1 = aux[:,kern_shape[0]//2]
-    aux =  fi.gaussian_filter(inp, sig2/2)
+    aux =  fi.gaussian_filter(inp, sigma[1]/2)
     aux = aux/np.max(aux)
     aux2 = aux[kern_shape[0]//2,:]
     #print np.max(aux)
@@ -225,24 +222,48 @@ def gkern2(kern_shape, sig1, sig2=None, show_image=False):
 
 #input = T.tensor4(name='input')
 class connection(object):
-	def __init__(self, input, filter_shape, sigma, weights_file):
+	def __init__(self, input, i_shape, filter_shape, sigmas, weights_file, k=1, ):
+		self.input = input
+		self.i_shape = i_shape
+		print input
+		self.shape = filter_shape
+		try:
+			if len(sigmas) == 2:
+				self.sigma = sigmas
+			elif len(sigmas) == 1:
+				self.sigma = (sigmas, sigmas)
+			else: 
+				print "[Error] Sigma should be of size 1 or 2. " + str(sigmas.size) + "was found instead. "
+		except AttributeError:
+			self.sigma = (sigma, sigma)
+			raise
+		
+		self.file = weights_file
+		self.k = k
+
+	def generateConnectionMatrix(self, o_shape, generate):
 		try: 
 			if generate:
 				np.load('asd')
 			else:
-				W=np.load(weights_file)
+				Wi=np.load(self.file)
 				print '[info] Weights loaded from file!'
-				print 'Shape = ' + str(W.shape)
+				print 'Shape = ' + str(Wi.shape)
 		except IOError:
 			print "[info] Weights file wasn't found. Generating new connections"
-			kern1 = gkern2(filter_shape,sigma)
-			W = kernel2connection(kern1, i_shape, o_shape)
+			kern1 = gkern2(self.shape,self.sigma)
+			#kern1 = np.zeros(filter_shape)
+			Wi = kernel2connection(kern1, self.i_shape, o_shape)
 			#Wi /= np.sum(Wi,1).reshape((Wi.shape[0],1))*15
 			print 'Shape = ' + str(Wi.shape)
+			if np.sum(Wi,1)[0] != 1:
+				Wi /= np.sum(Wi,1).reshape((Wi.shape[0],1))*self.k
 			np.save(i_file,Wi)
 
+		return Wi
+
 class HebbianAdaptiveLayer(object):
-	def __init__(self, input, filter_shape, sigma,i_shape,o_shape, i_file, r_file, Wi = False, Wr = False):
+	def __init__(self, input, connections, i_shape, o_shape):
 		global generate
 		# Mean neuron density ~80k/mm^3 in V2 (skoglund 1996)
 		# Synapse length follow a power law ()
@@ -251,62 +272,27 @@ class HebbianAdaptiveLayer(object):
 		# Ahould compare RF data with Van den Bergh 2010
 
 		# Initialize weights as a shared variable
-		#n_col=input.shape[1]
+		try:
+			print "[info] # Connections: " + str(len(connections))
+		except AttributeError:
+			print "[Error] Connections must be a list of connections. "
+			raise
 
-		try: 
-			if generate:
-				np.load('asd')
-			else:
-				Wi=np.load(i_file)
-				print '[info] Weights loaded from file!'
-				print 'Shape = ' + str(Wi.shape)
-		except IOError:
-			print "[info] Weights file wasn't found. Generating new connections"
-			kern1 = gkern2(filter_shape,sigma)
-			Wi = kernel2connection(kern1, i_shape, o_shape)
-			#Wi /= np.sum(Wi,1).reshape((Wi.shape[0],1))*15
-			print 'Shape = ' + str(Wi.shape)
-			np.save(i_file,Wi)
+		self.weights = []
+		self.params = []
+		self.yw = []
+		self.x_yw = []
+		self.connections = connections
 
-		try: 
-			if generate:
-				np.load('asd')
-			else:
-				Wr=np.load(r_file)
-				print 'Weights loaded from file!'
-		except IOError:
-			print "Weights file wasn't found. Generating new connections"
-			kern2 = gkern2(filter_shape,sigma)
-			Wr = kernel2connection(kern2, o_shape,o_shape)
-			#Wr /= np.sum(Wi,1)
-			np.save(r_file,Wr)
-
-		if np.sum(Wi,1)[0] != 1:
-			Wi /= np.sum(Wi,1).reshape((Wi.shape[0],1))*5
-		if np.sum(Wr,1)[0] != 1:
-			Wr /= np.sum(Wr,1).reshape((Wr.shape[0],1))
-		print np.sum(Wi,0)
-		print np.sum(Wi,1)
-		plt.plot(Wi[1,:])
-		plt.show()
-
-
-		self.Wi= theano.shared( 
-				sp.csc_matrix(
-				np.asarray( 
-				Wi, 
-				dtype=input.dtype) ), name ='Wi')
-		self.Wr = theano.shared( 
-				sp.csc_matrix(
-				np.asarray( 
-				Wr, 
-				dtype=input.dtype) ), name ='Wr')
-		# Output of the layer is the sigmoid of the convolved network
+		# Output of the layer is the sigmoid of the convolved network, computed in params
 		self.state = theano.shared( 
 			sp.csc_matrix(
 			np.asarray( 
 			np.zeros((o_shape[0]*o_shape[1],1)), 
 			dtype=input.dtype) ), name ='St')
+
+		self.params.append(self.state)
+
 
 		self.input = input
 
@@ -318,27 +304,71 @@ class HebbianAdaptiveLayer(object):
 			np.asarray( 
 			np.zeros((o_shape[0]*o_shape[1],1)), 
 			dtype=input.dtype) ), name ='Out')
+
+		self.params.append(self.output)
 		#sparse.structured_sigmoid(sparse.structured_dot(self.input, self.Wi))  #T.dot(self.input, self.Wi))
 		# input = external + recursive (from layer)
 		# self.input = T.dot(input, self.Wi) #+ T.sum(T.dot(self.state,self.Wr),1)
 
-		# out: nx1
-		# Wi: mxn
-		# outT x WiT : 1xm
-		self.yw = sparse.structured_dot(
-						sparse.transpose(self.output),
-						sparse.transpose(self.Wi))
-		# in: nx1
-		self.x_yw = sparse.sub(
-						sparse.transpose(self.input),
-						self.yw)
+		
+		for i, c in enumerate(connections):
+			# Weights
+			self.weights.append(
+				theano.shared( 
+					sp.csc_matrix(
+					np.asarray( 
+					c.generateConnectionMatrix(o_shape, generate), 
+					dtype=input.dtype) ), name ='Wi_' + str(i)))
+			# yw
+			# out: nx1
+			# Wi: mxn
+			# outT x WiT : 1xm
+			self.yw.append(
+				sparse.structured_dot(
+					sparse.transpose(self.output),
+					sparse.transpose(self.weights[i])))
+			# x_yw
+			# in: nx1
+			self.x_yw.append(
+				sparse.sub(
+					sparse.transpose(c.input),
+					self.yw[i]))
+		self.params.append(self.weights)
 
+	def getUpdateParams(self):
+		update = []
+		aux = []
 
-		# optional: self.output = T.nnet.sigmoid(conv_out+self.output)
-		self.params = [self.Wi, self.Wr, self.state, self.output]
-		#self.input=input
+		# Update state
+		update.append( (self.params[0], input_layer.output) )
 
+		# Update output
+		print len(self.connections)
+		for i, c in enumerate(self.connections):
+			aux.append(sparse.structured_dot(
+						sparse.transpose(c.input), 
+						self.params[2][i]
+						))
+		aux2 = aux.pop()
+		for a in range(len(aux)):
+			aux2 = sparse.add(aux2,aux.pop())
+			print aux2
+		update.append((self.params[1],
+			sparse.transpose(
+				sparse.structured_sigmoid(aux2))))
 
+		for i, w in enumerate(self.params[2]):
+			update.append( (w,  
+				#layer.params[0]))
+				sparse.add( 
+					w, 
+					LR*sparse.transpose(
+						sparse.structured_dot(self.params[1], self.x_yw[i])
+						)
+					)
+				))
+
+		return update
 
 # de Prova
 class HebbianInhibitoryLayer(object):
@@ -363,7 +393,7 @@ class HebbianInhibitoryLayer(object):
 				print 'Shape = ' + str(Wi.shape)
 		except IOError:
 			print "[info] Weights file wasn't found. Generating new connections"
-			kern1 = gkern2(filter_shape,sigma,sigma2)
+			kern1 = gkern2(filter_shape,(sigma,sigma2))
 			#kern1 = np.zeros(filter_shape)
 			Wi = kernel2connection(kern1, o_shape, o_shape)
 			Wi = Wi
@@ -379,7 +409,7 @@ class HebbianInhibitoryLayer(object):
 				print 'Weights loaded from file!'
 		except IOError:
 			print "Weights file wasn't found. Generating new connections"
-			kern2 = gkern2((15,15),1,5)
+			kern2 = gkern2((15,15),(1,5))
 			#kern2 = np.zeros((9,9))
 			#kern2[4,4]=1
 			#plt.imshow(kern2)
@@ -482,11 +512,18 @@ generate = True
 
 i_file = 'inh_i_' + str(input_shape) + 'x' + str(input_shape) + '_' + str(inp_filter_shape[0]) + 's' + str(inp_filter_sigma) + '.npy'
 r_file = 'inh_r_' + str(input_shape) + 'x' + str(input_shape) + '_' + str(3) + 's' + str(1) + '.npy'
-input_layer = HebbianInhibitoryLayer(layer0_input,inp_filter_shape,inp_filter_sigma,input_shape,input_shape, i_file, r_file)
+
+c1in = connection(layer0_input,input_shape,inp_filter_shape, [inp_filter_sigma, inp_filter_sigma], i_file)
+Cin = [c1in]
+#input_layer = HebbianInhibitoryLayer(layer0_input,inp_filter_shape,inp_filter_sigma,input_shape,input_shape, i_file, r_file)
+input_layer = HebbianAdaptiveLayer(layer0_input,Cin,input_shape, input_shape)
 
 i_file = 'Wi_' + str(input_shape) + 'x' + str(L0_shape) + '_' + str(filter_shape[0]) + 's' + str(sigma) + '.npy'
 r_file = 'test_Wr.npy'
-layer0 = HebbianAdaptiveLayer(input_layer.output,filter_shape,sigma,input_shape, L0_shape, i_file, r_file)
+# input, filter_shape, sigmas, weights_file, k=1
+c1L0 = connection(input_layer.output,input_shape,filter_shape, [sigma, sigma], i_file)
+CL0 = [c1L0]
+layer0 = HebbianAdaptiveLayer(input_layer.output,CL0,input_shape, L0_shape)
 
 #layer1 = HebbianAdaptiveLayer(layer0.output,filter_shape,sigma,s1,s2,s2,final_shape,Wi=Wi,Wr=Wr)
 
@@ -538,67 +575,8 @@ print layer0.Wi
 print old_W
 #wi=hebbianL([layer.params[0]])
 '''
-for layer in layers:
-	
-	Wis.append( (layer.params[0],  
-		#layer.params[0]))
-		sparse.add( 
-			layer.params[0] , 
-			LR*sparse.transpose(
-				sparse.structured_dot(layer.output, layer.x_yw)
-				)
-			)
-		))
-	
-		
-		# (layer.params[0], 
-		# sparse.add( 
-		# 	layer.params[0] , 
-		# 	LR*sparse.sub(
-		# 		sparse.structured_dot(sparse.transpose(layer.output), layer.input) , 
-		# 		sparse.structured_dot(
-		# 			sparse.structured_dot(
-		# 				sparse.transpose(layer.output), 
-		# 				layer.output),
-		# 			layer.params[0])
-		# 		) 
-		# 	)  
-		# ))
-	
-	Wrs.append( (layer.params[1],layer.params[1]) )
-	states.append( (layer.params[2], layer.output) )
-	outs.append( (layer.params[3], sparse.transpose(
-											sparse.structured_sigmoid(
-												sparse.structured_dot(
-													sparse.transpose(layer.input), 
-													layer.params[0]
-													)
-												)
-											)
-										) )
 
-
-#Update inhibitory
-Wis.append( (input_layer.params[0], input_layer.params[0]))
-Wrs.append( (input_layer.params[1],input_layer.params[1]) )
-states.append( (input_layer.params[2], input_layer.output) )
-outs.append( (input_layer.params[3], sparse.transpose(
-											sparse.structured_sigmoid(
-												sparse.add(
-													sparse.structured_dot(
-														sparse.transpose(input_layer.input), 
-														input_layer.params[1]
-														),
-													sparse.structured_dot(
-														sparse.transpose(input_layer.state), 
-														input_layer.params[0]
-														)
-													)
-
-												)
-											)
-										) )
-updates = Wis + Wrs + states + outs
+updates = layer0.getUpdateParams()
 
 
 propagate = theano.function(
@@ -723,7 +701,7 @@ for n_epoch in range(1000):
 	p.set_data( z.reshape(input_shape,order='C') )
 	#print z.shape
 	#w.set_data( outp.toarray().reshape((s1,s2)) )
-	w.set_data(layer0.Wi.get_value().toarray())
+	w.set_data(layer0.weights[0].get_value().toarray())
 	out_plot.set_data(outp[0].toarray().reshape(L0_shape))
 	#w.set_data(Wi)
 	fig.canvas.draw()
