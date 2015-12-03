@@ -91,7 +91,7 @@ def non_square_diagonal(s1,s2,sg=0.01, show_image=False):
 	    res -=np.min(res,1).reshape(res.shape[0],1)
 	    res /= np.max(res,1).reshape(res.shape[0],1)
 	    res *= res*res*res
-	    #res[res<0.6]=0
+	    res[res<0.6]=0
 	    res -=np.min(res,1).reshape(res.shape[0],1)
 	    res /= np.max(res,1).reshape(res.shape[0],1)
 	    #res = res/np.sum(res,1).reshape(s1,1)
@@ -337,6 +337,7 @@ class HebbianAdaptiveLayer(object):
 		self.Wmin=[]
 		self.xy=[]
 		self.AWW=[]
+		self.oja=[]
 
 		# Output of the layer is the sigmoid of the convolved network, computed in params
 		self.state = theano.shared( 
@@ -369,7 +370,7 @@ class HebbianAdaptiveLayer(object):
 		
 
 	def addConnections(self, connections):
-		global delta, Wmin, Wmax, awe
+		global delta, Wmin, Wmax, awe, tau_n, tau_p
 		self.connections = self.connections + connections
 		i=0
 		for i, c in enumerate(connections):
@@ -417,10 +418,10 @@ class HebbianAdaptiveLayer(object):
 				auxY=sparse.sub(self.weights[i], self.Wmin[j])
 				self.LR.append(delta*(
 					sparse.sub(
-						sparse.structured_pow(
+						(1/tau_p)*sparse.structured_pow(
 							sparse.sub(self.Wmax[j], self.weights[i]),
 							1), 
-						sparse.structured_pow(
+						(1/tau_n)*sparse.structured_pow(
 							sparse.sub(self.Wmin[j], self.weights[i]),
 							1))))
 				self.xy.append(
@@ -428,6 +429,10 @@ class HebbianAdaptiveLayer(object):
 						c.input,
 						sparse.transpose(self.output)))
 				self.AWW.append(
+					awe*delta*sparse.structured_pow(
+								sparse.sub(self.Wmax[j], self.weights[i]),
+								1)*self.weights[i])
+				self.oja.append(
 					awe*delta*sparse.structured_pow(
 								sparse.sub(self.Wmax[j], self.weights[i]),
 								1)*self.weights[i])
@@ -514,7 +519,7 @@ x = T.matrix('x',dtype = 'float32') #T.matrix('x')   # the data is presented as 
 input_shape = (51, 5)
 inp_filter_shape = (5,5)
 inp_filter_sigma = 7
-L0_shape = (21,21)
+L0_shape = (41,41)
 filter_shape = (9,9)
 L1_shape = (15,15)
 
@@ -531,7 +536,9 @@ LR = np.cast['float32'](0.000001)
 delta = np.cast['float32'](0.000001)
 Wmax =np.cast['float32'](0.9)
 Wmin = np.cast['float32'](0.0)
-awe = np.cast['float32'](-0.7) # LR * int(W(*)e), usually negative
+awe = np.cast['float32'](-5) # LR * int(W(*)e), usually negative
+tau_n = np.cast['float32'](0.2)
+tau_p = np.cast['float32'](0.3)
 
 global generate
 generate = True
@@ -541,12 +548,12 @@ Cin = []
 #input_layer = HebbianInhibitoryLayer(layer0_input,inp_filter_shape,inp_filter_sigma,input_shape,input_shape, i_file, r_file)
 LIV = HebbianAdaptiveLayer(layer0_input,Cin,input_shape, input_shape)
 LGN2IV = connection('IV_ex_',layer0_input,  input_shape,(5,5), [3,5], k=1)
-IVrec = connection('IV_rec_',LIV.output, input_shape,(15,15), [3,11], k=0.7, recursive = True)
-IVinh = connection('IV_inh_',LIV.output, input_shape,(15,15), [3,7], k=-0.7, recursive = True)
-LIV.addConnections([LGN2IV,IVrec, IVinh])
+IVrec = connection('IV_rec_',LIV.output, input_shape,(15,15), [3,9], k=10, recursive = True)
+IVinh = connection('IV_inh_',LIV.output, input_shape,(15,15), [3,7], k=-0.4, recursive = True)
+LIV.addConnections([LGN2IV, IVinh])#,IVrec, IVinh])
 #i_file = 'Wi_' + str(input_shape) + 'x' + str(L0_shape) + '_' + str(filter_shape[0]) + 's' + str(sigma) + '.npy'
 LII_III = HebbianAdaptiveLayer(LIV.output,Cin,input_shape, L0_shape)
-LIV2II = connection('IV_ex_',LIV.output,  input_shape,(11,11), [5,5], k=1)
+LIV2II = connection('II_ex_',LIV.output,  input_shape,(11,11), [7,7], k=0.01)
 #IIrec = connection('IV_rec_',LII_III.output, L0_shape,(15,15), [3,11], k=0.7, recursive = True)
 #IIinh = connection('IV_inh_',LII_III.output, L0_shape,(15,15), [3,7], k=-0.7, recursive = True)
 LII_III.addConnections([LIV2II])#,IIrec, IIinh])
@@ -597,7 +604,7 @@ orig_in = ax[1].imshow( z.reshape(input_shape) ,vmin = 0, vmax = 1,aspect='auto'
 #plt.show()
 #n_inputs = s1
 CF = 40
-freqs = np.arange(7)/4.*input_shape[0]
+freqs = np.arange(3)/4.*input_shape[0]
 logs = np.log(np.arange((input_shape[1])+2)+1)
 global Maux
 Maux = logs[1:input_shape[1]+1]*1.5
