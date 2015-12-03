@@ -45,13 +45,19 @@ theano.config.floatX='float32'
 
 #theano.config.device = 'gpu'
 
-global A1Tau
+global A1Tau, auxTau
 A1Tau = 0.01 # Between [ 0.01 , 0.02 ], from Shamma/Yang
 
 
 def generateRandomSignalBut(epoch,center_F,size=512,f=(0,12),but=0,noi=0.33, n_harmonics=0):
     #f=(110,220,330,440,660,880)
-    x= np.random.rand(size)*noi
+    if epoch%5 == 0:
+    	x= np.random.rand(size)*noi
+    else: 
+    	try: 
+    		x=x
+    	except UnboundLocalError:
+    		x=np.zeros(size)
     Nx=0
     if epoch%50 == 0:
         it=(epoch%(int(10000/30)))%len(f)
@@ -442,6 +448,7 @@ class HebbianAdaptiveLayer(object):
 
 
 	def getUpdateParams(self):
+		global auxTau
 		update = []
 		aux = []
 
@@ -462,7 +469,8 @@ class HebbianAdaptiveLayer(object):
 		from theano import pp
 		print 'out: '
 		print pp(aux2)
-		update.append((self.params[1],sparse.transpose(sparse.structured_sigmoid(aux2))))
+		update.append((self.params[1],sparse.transpose(sparse.structured_sigmoid(
+			sparse.add((auxTau)*aux2,(1-(auxTau)))))))
 		# Hardcoded!!
 		'''update.append((self.params[1],
 			sparse.transpose(
@@ -539,7 +547,8 @@ Wmin = np.cast['float32'](0.0)
 awe = np.cast['float32'](-5) # LR * int(W(*)e), usually negative
 tau_n = np.cast['float32'](0.2)
 tau_p = np.cast['float32'](0.3)
-
+A1Tau = 15.0
+auxTau = 1/12.0
 global generate
 generate = True
 
@@ -548,8 +557,8 @@ Cin = []
 #input_layer = HebbianInhibitoryLayer(layer0_input,inp_filter_shape,inp_filter_sigma,input_shape,input_shape, i_file, r_file)
 LIV = HebbianAdaptiveLayer(layer0_input,Cin,input_shape, input_shape)
 LGN2IV = connection('IV_ex_',layer0_input,  input_shape,(5,5), [3,5], k=1)
-IVrec = connection('IV_rec_',LIV.output, input_shape,(15,15), [3,9], k=10, recursive = True)
-IVinh = connection('IV_inh_',LIV.output, input_shape,(15,15), [3,7], k=-0.4, recursive = True)
+IVrec = connection('IV_rec_',LIV.output, input_shape,(15,15), [2,9], k=10, recursive = True)
+IVinh = connection('IV_inh_',LIV.output, input_shape,(15,15), [2,3], k=-0.1, recursive = True)
 LIV.addConnections([LGN2IV, IVinh])#,IVrec, IVinh])
 #i_file = 'Wi_' + str(input_shape) + 'x' + str(L0_shape) + '_' + str(filter_shape[0]) + 's' + str(sigma) + '.npy'
 LII_III = HebbianAdaptiveLayer(LIV.output,Cin,input_shape, L0_shape)
@@ -657,10 +666,10 @@ def average_input(new_input):
 	
 	#out[np.isfinite(out) == False] = input_out[np.isfinite(out) == False]
 	out = np.apply_along_axis(infiniteIsMean,0,out, input_out)
-	input_out = input_out + (1/A1Tau) * np.maximum(out,0)
+	input_out = (1-(1/A1Tau) )*input_out + (1/A1Tau) * np.maximum(out,0)
 	#print 'max: ' + str(np.max(out))
 	#print 'min: ' + str(np.min(out))
-	return out
+	return input_out
 	
 def dataIsAudio(x,logs,shap):
 	
