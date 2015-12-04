@@ -65,7 +65,7 @@ def generateRandomSignalBut(epoch,center_F,size=512,f=(0,12),but=0,noi=0.33, n_h
         print "New CF: "  + str(center_F) + " from " + str(f)
         while center_F==but:
             center_F = np.random.choice(f,1)/2
-    for i in range(8):
+    for i in range(4):
     	#print max(0,int(center_F)+i-4)
         x[max(0,int(center_F)+i-4)]=0.9
         Nx+=0.9
@@ -236,7 +236,7 @@ def gkern2(kern_shape, sigma, show_image=False):
     #print np.max(aux)
     aux = sg.convolve(aux1.reshape(1,kern_shape[0]),aux2.reshape(kern_shape[0],1))
     
-    #aux[aux<0.1]=0
+    aux[aux<0.1]=0
     print aux.shape
     print "Remember to always check how is the kernel!!!"
     if show_image:
@@ -469,8 +469,8 @@ class HebbianAdaptiveLayer(object):
 		from theano import pp
 		print 'out: '
 		print pp(aux2)
-		update.append((self.params[1],sparse.transpose(sparse.structured_sigmoid(
-			sparse.add((auxTau)*aux2,(1-(auxTau)))))))
+		update.append((self.params[1],sparse.structured_sigmoid(
+			sparse.add((auxTau)*sparse.transpose(aux2),(1-(auxTau))*self.params[1]))))
 		# Hardcoded!!
 		'''update.append((self.params[1],
 			sparse.transpose(
@@ -502,12 +502,13 @@ class HebbianAdaptiveLayer(object):
 		for i, w in enumerate(self.params[2]):
 			update.append( (w, #w))
 				#layer.params[0]))
-					sparse.structured_maximum(
+					sparse.structured_minimum(sparse.structured_maximum(
 						sparse.add(
 							w,
-							sparse.add(self.xy[i], 
-							self.AWW[i])),
-					0)
+							self.connections[i].inhibition*sparse.add(
+								self.xy[i], 
+								self.AWW[i])),
+						0),1)
 				) )
 
 		return update
@@ -539,16 +540,16 @@ sigma = 1
 
 #i_file = 'Wi_' + str(input_shape) + 'x' + str(L0_shape) + '_' + str(filter_shape[0]) + 's' + str(sigma) + '.npy'
 #r_file = 'test_Wr.npy'
-LR = np.cast['float32'](0.000001)
+LR = np.cast['float32'](0.001)
 #aux = np.array(0.01,dtype='float32')
-delta = np.cast['float32'](0.000001)
+delta = np.cast['float32'](0.001)
 Wmax =np.cast['float32'](0.9)
 Wmin = np.cast['float32'](0.0)
-awe = np.cast['float32'](-5) # LR * int(W(*)e), usually negative
-tau_n = np.cast['float32'](0.2)
-tau_p = np.cast['float32'](0.3)
-A1Tau = 15.0
-auxTau = 1/12.0
+awe = np.cast['float32'](-0.7) # LR * int(W(*)e), usually negative
+tau_n = np.cast['float32'](-1./0.9)# Normally 1/tau_n * 1/tau_p <0 and >-(w//1-w)), with w~stability weight 
+tau_p = np.cast['float32'](1./0.9)
+A1Tau = 10.0
+auxTau = 1/4.0
 global generate
 generate = True
 
@@ -556,13 +557,13 @@ generate = True
 Cin = []
 #input_layer = HebbianInhibitoryLayer(layer0_input,inp_filter_shape,inp_filter_sigma,input_shape,input_shape, i_file, r_file)
 LIV = HebbianAdaptiveLayer(layer0_input,Cin,input_shape, input_shape)
-LGN2IV = connection('IV_ex_',layer0_input,  input_shape,(5,5), [3,5], k=1)
-IVrec = connection('IV_rec_',LIV.output, input_shape,(15,15), [2,9], k=10, recursive = True)
-IVinh = connection('IV_inh_',LIV.output, input_shape,(15,15), [2,3], k=-0.1, recursive = True)
+LGN2IV = connection('IV_ex_',layer0_input,  input_shape,(5,5), [3,5], k=0.000011)
+IVrec = connection('IV_rec_',LIV.output, input_shape,(15,15), [2,11], k=7, recursive = True)
+IVinh = connection('IV_inh_',LIV.output, input_shape,(15,15), [2,5], k=-0.0455, recursive = True)
 LIV.addConnections([LGN2IV, IVinh])#,IVrec, IVinh])
 #i_file = 'Wi_' + str(input_shape) + 'x' + str(L0_shape) + '_' + str(filter_shape[0]) + 's' + str(sigma) + '.npy'
 LII_III = HebbianAdaptiveLayer(LIV.output,Cin,input_shape, L0_shape)
-LIV2II = connection('II_ex_',LIV.output,  input_shape,(11,11), [7,7], k=0.01)
+LIV2II = connection('II_ex_',LIV.output,  input_shape,(11,11), [7,7], k=0.02)
 #IIrec = connection('IV_rec_',LII_III.output, L0_shape,(15,15), [3,11], k=0.7, recursive = True)
 #IIinh = connection('IV_inh_',LII_III.output, L0_shape,(15,15), [3,7], k=-0.7, recursive = True)
 LII_III.addConnections([LIV2II])#,IIrec, IIinh])
@@ -613,7 +614,7 @@ orig_in = ax[1].imshow( z.reshape(input_shape) ,vmin = 0, vmax = 1,aspect='auto'
 #plt.show()
 #n_inputs = s1
 CF = 40
-freqs = np.arange(3)/4.*input_shape[0]
+freqs = np.arange(7)/4.*input_shape[0]
 logs = np.log(np.arange((input_shape[1])+2)+1)
 global Maux
 Maux = logs[1:input_shape[1]+1]*1.5
@@ -690,7 +691,7 @@ def dataIsAudio(x,logs,shap):
 print logs
 
 
-for n_epoch in range(1000):
+for n_epoch in range(30000):
 #def updat(event):
 	#global n, CF, n_inputs,freqs,noise
 	#z=np.random.rand(s1,s2)
@@ -704,7 +705,7 @@ for n_epoch in range(1000):
 	z=dataIsAudio(fft_input, logs, input_shape)
 	now = t.time()
 	outp = propagate(z)
-	print t.time()-now
+	#print t.time()-now
 	p.set_data( z.reshape(input_shape,order='C') )
 	#print z.shape
 	#w.set_data( outp.toarray().reshape((s1,s2)) )
