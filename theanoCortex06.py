@@ -124,7 +124,7 @@ def flattenKernel(k,n):
 	#new_kernel = k.flatten(0)
 	#plt.imshow(k,aspect='auto')
 	#plt.show()
-	if False:
+	if True:
 		plt.imshow(new_kernel.reshape(new_kernel.size,1),aspect='auto')
 		plt.show()
 	'''plt.imshow(k)
@@ -183,12 +183,12 @@ def kernel2connection(k,inp, out,show_image=True):
 	connections = sg.convolve(connections,aux)
 	if show_image:
 		#print connections[25,:].shape
-		#plt.imshow(connections[25,:].reshape((51,5), order='C'),aspect='auto')
+		plt.imshow(connections,aspect='auto')
 		plt.show()
 	connections = fitMatrixSize(connections,inp,out)
 	if show_image:
 		#print connections[25,:].shape
-		#plt.imshow(connections[25,:].reshape((51,1)),aspect='auto')
+		plt.imshow(connections,aspect='auto')
 		plt.show()
 	
 	return connections.astype('float32')
@@ -196,7 +196,7 @@ def kernel2connection(k,inp, out,show_image=True):
 	# a breadth-first search. Since the reverse Cuthill-McKee ordering of a matrix
 
 
-def gkern1(kern_shape, nsig=3,show_image=False):
+def gkern1(kern_shape, nsig=3,show_image=True):
     """Returns a 2D Gaussian kernel array. 
     size is kernlen, gaussian is centered 
     in the middle and std is 'nsig' units"""
@@ -216,7 +216,7 @@ def gkern1(kern_shape, nsig=3,show_image=False):
         plt.show()
     return aux
 
-def gkern2(kern_shape, sigma, show_image=False):
+def gkern2(kern_shape, sigma, show_image=True):
     """Returns a 2D Gaussian kernel array. 
     size is kernlen, gaussian is centered 
     in the middle and std is 'nsig' units"""
@@ -241,6 +241,7 @@ def gkern2(kern_shape, sigma, show_image=False):
     print "Remember to always check how is the kernel!!!"
     if show_image:
         plt.imshow(aux)
+        plt.title('genKern ' + str(kern_shape))
         plt.show()
     return aux
 '''def gkern3(kern_shape, sig1):
@@ -516,6 +517,9 @@ class HebbianAdaptiveLayer(object):
 
 	# Create the function that solves the previous operations
 
+
+
+
 x = T.matrix('x',dtype = 'float32') #T.matrix('x')   # the data is presented as rasterized images
 #y = T.matrix('y')
 #x.tag.test_value = np.random.rand(50,50)
@@ -524,7 +528,7 @@ x = T.matrix('x',dtype = 'float32') #T.matrix('x')   # the data is presented as 
 #weights1 = gkern2(filter_shape[2],sigma).reshape(filter_shape)
 
 
-input_shape = (51, 5)
+input_shape = (46, 1)
 inp_filter_shape = (5,5)
 inp_filter_sigma = 7
 L0_shape = (41,41)
@@ -535,7 +539,7 @@ layer0_input = sparse.csc_from_dense(x)
 
 #final_shape = (s2*s3)
 
-sigma = 1
+sigma = 3
 
 #i_file = 'Wi_' + str(input_shape) + 'x' + str(L0_shape) + '_' + str(filter_shape[0]) + 's' + str(sigma) + '.npy'
 #r_file = 'test_Wr.npy'
@@ -556,7 +560,7 @@ generate = True
 Cin = []
 #input_layer = HebbianInhibitoryLayer(layer0_input,inp_filter_shape,inp_filter_sigma,input_shape,input_shape, i_file, r_file)
 LIV = HebbianAdaptiveLayer(layer0_input,Cin,input_shape, input_shape)
-LGN2IV = connection('IV_ex_',layer0_input,  input_shape,(5,5), [3,5], k=1)
+LGN2IV = connection('IV_ex_',layer0_input,  input_shape,(5,5), [3,1], k=1)
 IVrec = connection('IV_rec_',LIV.output, input_shape,(15,15), [2,9], k=10, recursive = True)
 IVinh = connection('IV_inh_',LIV.output, input_shape,(15,15), [2,3], k=-0.1, recursive = True)
 LIV.addConnections([LGN2IV, IVinh])#,IVrec, IVinh])
@@ -718,3 +722,5 @@ for n_epoch in range(1000):
 
 #fig.canvas.mpl_connect('button_press_event', updat)
 #plt.show()
+if __name__ == '__main__':
+	main()
