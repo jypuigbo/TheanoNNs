@@ -12,7 +12,7 @@ import scipy.sparse as sp
 
 
 
-def non_square_diagonal(s1,s2,sg=0.01, show_image=False):
+def old_non_square_diagonal(s1,s2,sg=0.01, show_image=True):
 	if s1 == s2:
 		res = np.identity(s1)
 	else: 
@@ -28,12 +28,35 @@ def non_square_diagonal(s1,s2,sg=0.01, show_image=False):
 	    
 	    res -=np.min(res,1).reshape(res.shape[0],1)
 	    res /= np.max(res,1).reshape(res.shape[0],1)
-	    res *= res*res*res
-	    res[res<0.6]=0
+	    #res *= res*res*res
+	    res[res<0.2]=0
 	    res -=np.min(res,1).reshape(res.shape[0],1)
 	    res /= np.max(res,1).reshape(res.shape[0],1)
 	    #res = res/np.sum(res,1).reshape(s1,1)
 
+	if show_image:
+	        plt.imshow(res)
+	        plt.show()
+	return res
+
+def non_square_diagonal(s1,s2,sg=0.01, show_image=True):
+	if s1 == s2:
+		res = np.identity(s1)
+	else: 
+		id_ref = np.identity(max(s1,s2))
+		x_step = max(s1,s2)/float(s1)
+
+		y_step = max(s1,s2)/float(s2)
+		#print x_step, y_step
+		res = np.zeros((s1,s2))
+		for i in range(s1):
+			c_step_x = int(i/x_step)
+			#print c_step_x
+			for j in range(s2):
+				c_step_y = int(j/y_step)
+				res[i,j] = np.max( id_ref[ i*x_step : x_step*(i+1) , y_step*j : y_step*(j+1) ] )
+				#Consider adding here changes for border effects
+				#print res[i,j]
 	if show_image:
 	        plt.imshow(res)
 	        plt.show()
@@ -46,24 +69,30 @@ def flattenKernel(k,n):
 	output: new 1-dimensional kernel
 	'''
 	s = k.shape[0]
+	n=n#k.shape[1] ##
 	new_kernel = np.zeros((s,n))
 	print s/2.
 	print n/2.
+	print 'shape: ' + str(new_kernel.shape)
 	print 'here!!!!!'
 	new_kernel[int(s/2),int(n/2)]=1
 	new_kernel = sg.convolve(new_kernel,k,mode='same')
-	new_kernel = new_kernel.flatten(0)
+	plt.imshow(new_kernel)
+	plt.show()
+	new_kernel = np.hstack(new_kernel)
+	print 'shape: ' + str(new_kernel.shape)
 	#new_kernel = k.flatten(0)
 	#plt.imshow(k,aspect='auto')
 	#plt.show()
 	if True:
-		plt.imshow(new_kernel.reshape(new_kernel.size,1),aspect='auto')
+		plt.title('flattenedKernel')
+		plt.imshow(new_kernel.reshape(1,new_kernel.size),aspect='auto')
 		plt.show()
 	'''plt.imshow(k)
 	plt.show()
 	plt.imshow(new_kernel.reshape(1,new_kernel.size))
 	plt.show()'''
-	return new_kernel.reshape(new_kernel.size,1)
+	return new_kernel.reshape(1,new_kernel.size)
 
 def fitMatrixSize(mat,shape1, shape2):
 	'''After using convolutions to get the connection matrix, the matrix 
@@ -75,11 +104,11 @@ def fitMatrixSize(mat,shape1, shape2):
 		print size
 		#print "I'm in"
 		m = size/2
-		print m
+		#print m
 		center = int(mat.shape[1]/2)
 		if m < size/2.:
 			print "UP!!!!!!!!!!!!!!!!!!!!"
-			n_mat = mat[:,(center-int(m)):(center+int(m)+1)]
+			n_mat = mat[:,(center-int(m)):(center+int(m))+1]
 		else:
 			print "Down!!!!!!!!!!!!!!!!!!1"
 			n_mat = mat[:,(center-int(m)):(center+int(m))]
@@ -112,18 +141,19 @@ def kernel2connection(k,inp, out,show_image=True):
 	aux = flattenKernel(k,out[1])
 	#plt.imshow(aux, aspect='auto')
 	#plt.show()
-	connections = sg.convolve(connections,aux)
+	new_connections = sg.convolve(aux,connections)#,aux)
 	if show_image:
 		#print connections[25,:].shape
-		plt.imshow(connections,aspect='auto')
+		plt.imshow(new_connections,aspect='auto')
+		plt.colorbar()
 		plt.show()
-	connections = fitMatrixSize(connections,inp,out)
+	new_connections = fitMatrixSize(new_connections,inp,out)
 	if show_image:
 		#print connections[25,:].shape
-		plt.imshow(connections,aspect='auto')
+		plt.imshow(new_connections,aspect='auto')
 		plt.show()
 	
-	return connections.astype('float32')
+	return new_connections.astype('float32')
 	# The matrix could be reordered for visualization (or speed?) using the following:
 	# a breadth-first search. Since the reverse Cuthill-McKee ordering of a matrix
 
